@@ -1,0 +1,34 @@
+## Set up vido to run your kernel in a VM
+
+Following instructions for how to set up vido from
+https://brennan.io/2017/03/08/sane-kernel-dev/
+
+* Merge config (suspecting this does not overwrite an existing .config so either remove it or output to
+  new directory):
+  scripts/kconfig/merge_config.sh -n -m -O path/to/ddrefresher/configs/ \
+  path/to/kernel/configs/kvm_guest.config path/to/vido/kvm.config \
+  path/to/ddrefresher/configs/brennan_debug.config \
+  path/to/kernel/arch/x86/configs/x86_64_defconfig
+
+* make the merged config the .config in the kernel dir
+
+* run make olddefconfig to get default settings on all new options
+
+* make -j X
+
+* make modules_install BUT NOT the kernel itself (i.e. do not run make install).
+  That way you have the modules in the host file system, so that the guest kernel can find them
+  (you run a different kernel than your host, so all modules will be in a different dir)
+  but you are not installing the new kernel itself. Else there will be problems when you are unloading
+  a kernel module as the kernel will look for a modules database file that does not exist where it
+  expects it to be because of the way vido uses the host file system.
+
+* I like to install my new kernel to a work directory and run it from there
+  make install INSTALL_PATH=path/to/vm-kernel-dir
+
+* Run your new kernel
+  path/to/vido-repo/vido --kvm --kernel path/to/vm-kernel-dir/your-kernel
+  This will automatically open up a shell for you in the VM
+
+* insert your module from inside your VM
+  guest> /sbin/insmod path/to/kernel-module
