@@ -19,6 +19,9 @@
  *
  * 3. Test allocation of major number
  * 	> cat /proc/devices
+ *
+ * 4. Test automatic creation of device node (udev)
+ * 	> ls -l /dev
  * */
 
 #include <linux/kernel.h> // general module development
@@ -26,6 +29,7 @@
 #include <linux/module.h> // general module development
 #include <linux/kdev_t.h> // device file macros & functions
 #include <linux/fs.h> // allocation of character devices
+#include <linux/device.h> // creation of device nodes
 
 // functions in this file
 // module callbacks
@@ -56,7 +60,9 @@ static const struct kernel_param_ops testparm_cb_ops = {
 
 // devices
 // dev_t stat_testdev = MKDEV(235, 0); // static device
-dev_t dyn_testdev = 0;
+static dev_t dyn_testdev = 0;
+static struct class * dyn_testdev_class = 0;
+static struct device * dyn_testdev_dev = 0;
 
 // registrations
 MODULE_LICENSE("GPL");
@@ -95,7 +101,23 @@ static int __init testmod_init(void) {
 	printk(KERN_INFO "[testmod] Successful dynamic allocation of major %d minor %d\n",
 			MAJOR(dyn_testdev), MINOR(dyn_testdev));
 
-	return 0;
+	// we have the device number, let's create the device node
+	dyn_testdev_class = class_create (THIS_MODULE, "dyn_testdev_class");
+	if(!dyn_testdev_class) {
+		printk(KERN_INFO "[testmod] Error on device class creation\n");
+		unregister_chrdev_region(dyn_testdev, 1);
+		goto err;
+
+	}
+
+	dyn_testdev_dev = device_create (dyn_testdev_class, NULL, dyn_testdev, NULL, "dyn_testdev_dev");
+	if(!dyn_testdev_dev) {
+		printk(KERN_INFO "[testmod] Error on device creation\n");
+		class_destroy(dyn_testdev_class);
+		unregister_chrdev_region(dyn_testdev, 1);
+		goto err;
+
+	}	return 0;
 err:
 	return -1;
 }
@@ -103,6 +125,12 @@ err:
 static void __exit testmod_exit(void)
 {
 	printk(KERN_INFO "[testmod] Removing test module...\n");
+
+	// free everything in reverse order
+	// note that we don't use the struct device here!
+	device_destroy(dyn_testdev_class, dyn_testdev);
+	class_destroy(dyn_testdev_class);
+
 	// unregister_chrdev_region(stat_testdev, 1);
 	unregister_chrdev_region(dyn_testdev, 1);
 }
