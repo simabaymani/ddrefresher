@@ -21,9 +21,9 @@
  * 	> cat /proc/devices
  * */
 
-#include <linux/kernel.h>
-#include <linux/init.h>
-#include <linux/module.h>
+#include <linux/kernel.h> // general module development
+#include <linux/init.h> // general module development
+#include <linux/module.h> // general module development
 #include <linux/kdev_t.h> // device file macros & functions
 #include <linux/fs.h> // allocation of character devices
 
