@@ -56,6 +56,7 @@ static const struct kernel_param_ops testparm_cb_ops = {
 
 // devices
 dev_t stat_testdev = MKDEV(235, 0);
+dev_t dyn_testdev = 0;
 
 // registrations
 MODULE_LICENSE("GPL");
@@ -77,13 +78,23 @@ module_param_cb(testparm_cb, &testparm_cb_ops, &testparm_cb, S_IRUSR | S_IWUSR);
 static int __init testmod_init(void) {
 	printk(KERN_INFO "[testmod] Starting test module...\n");
 
-	// Static allocation of device node, give your first wanted device and the range
+	// Static allocation of device number, give your first wanted device and the range
 	if(register_chrdev_region( stat_testdev, 1, "Testmod statically allocated dev")) {
-		printk(KERN_INFO "[testmod] Error static allocation of major/minor numbers");
+		printk(KERN_INFO "[testmod] Error static allocation of major/minor numbers\n");
 		goto err;
 	}
-	printk(KERN_INFO "[testmod] Successful static allocation of major %d minor %d",
+	printk(KERN_INFO "[testmod] Successful static allocation of major %d minor %d\n",
 			MAJOR(stat_testdev), MINOR(stat_testdev));
+
+	// Dynamic allocation of device number
+	if(alloc_chrdev_region(&dyn_testdev, 0, 1,
+				"Testmod dynamically allocated dev")) {
+		printk(KERN_INFO "[testmod] Error dynamic allocation of major/minor numbers\n");
+		goto err;
+	}
+	printk(KERN_INFO "[testmod] Successful dynamic allocation of major %d minor %d\n",
+			MAJOR(dyn_testdev), MINOR(dyn_testdev));
+
 	return 0;
 err:
 	return -1;
@@ -93,6 +104,7 @@ static void __exit testmod_exit(void)
 {
 	printk(KERN_INFO "[testmod] Removing test module...\n");
 	unregister_chrdev_region(stat_testdev, 1);
+	unregister_chrdev_region(dyn_testdev, 1);
 }
 
 static int testmod_testparm_cb_set(const char *val, const struct kernel_param *kp) {
