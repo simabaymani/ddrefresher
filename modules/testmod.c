@@ -17,11 +17,15 @@
  * 	> echo 5 > /sys/module/testmod/parameters/testparm_cb
  * 	> dmesg
  *
+ * 3. Test allocation of major number
+ * 	> cat /proc/devices
  * */
 
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/module.h>
+#include <linux/kdev_t.h> // device file macros & functions
+#include <linux/fs.h> // allocation of character devices
 
 // functions in this file
 // module callbacks
@@ -50,6 +54,8 @@ static const struct kernel_param_ops testparm_cb_ops = {
 //	.free = NULL
 };
 
+// devices
+dev_t stat_testdev = MKDEV(235, 0);
 
 // registrations
 MODULE_LICENSE("GPL");
@@ -70,12 +76,23 @@ module_param_cb(testparm_cb, &testparm_cb_ops, &testparm_cb, S_IRUSR | S_IWUSR);
 
 static int __init testmod_init(void) {
 	printk(KERN_INFO "[testmod] Starting test module...\n");
+
+	// Static allocation of device node, give your first wanted device and the range
+	if(register_chrdev_region( stat_testdev, 1, "Testmod statically allocated dev")) {
+		printk(KERN_INFO "[testmod] Error static allocation of major/minor numbers");
+		goto err;
+	}
+	printk(KERN_INFO "[testmod] Successful static allocation of major %d minor %d",
+			MAJOR(stat_testdev), MINOR(stat_testdev));
 	return 0;
+err:
+	return -1;
 }
 
 static void __exit testmod_exit(void)
 {
 	printk(KERN_INFO "[testmod] Removing test module...\n");
+	unregister_chrdev_region(stat_testdev, 1);
 }
 
 static int testmod_testparm_cb_set(const char *val, const struct kernel_param *kp) {
