@@ -22,6 +22,12 @@
  *
  * 4. Test automatic creation of device node (udev)
  * 	> ls -l /dev
+ *
+ * 5. Test file operation callbacks
+ * 	> echo 1 > /dev/dyn_testdev_dev
+ * 	> dmesg
+ * 	> cat /dev/dyn_testdev_dev
+ * 	> dmesg
  * */
 
 #include <linux/kernel.h> // general module development
@@ -30,6 +36,7 @@
 #include <linux/kdev_t.h> // device file macros & functions
 #include <linux/fs.h> // allocation of character devices
 #include <linux/device.h> // creation of device nodes
+#include <linux/cdev.h> // cdev utils
 
 // functions in this file
 // module callbacks
@@ -38,6 +45,12 @@ static void __exit testmod_exit(void);
 
 // parameter callbacks
 static int testmod_testparm_cb_set(const char *val, const struct kernel_param *kp);
+
+// fops callbacks
+static int testmod_open(struct inode * i, struct file * f);
+static int testmod_release(struct inode *i, struct file * f);
+static ssize_t testmod_read(struct file * f, char __user * buf, size_t bytes, loff_t * offset);
+static ssize_t testmod_write(struct file * f, const char __user * buf, size_t bytes, loff_t * offset);
 
 // module parameters
 // simple module parameter, just set it when loading module
@@ -63,6 +76,15 @@ static const struct kernel_param_ops testparm_cb_ops = {
 static dev_t dyn_testdev = 0;
 static struct class * dyn_testdev_class = 0;
 static struct device * dyn_testdev_dev = 0;
+static struct cdev cdev;
+static struct file_operations fops =
+{
+	.owner          = THIS_MODULE,
+	.read           = testmod_read,
+	.write          = testmod_write,
+	.open           = testmod_open,
+	.release        = testmod_release,
+};
 
 // registrations
 MODULE_LICENSE("GPL");
@@ -101,10 +123,20 @@ static int __init testmod_init(void) {
 	printk(KERN_INFO "[testmod] Successful dynamic allocation of major %d minor %d\n",
 			MAJOR(dyn_testdev), MINOR(dyn_testdev));
 
+	cdev_init(&cdev, &fops);
+	cdev.owner = THIS_MODULE;
+
+	if(cdev_add(&cdev, dyn_testdev, 1)) {
+		printk(KERN_INFO "[testmod] Error when adding cdev\n");
+		unregister_chrdev_region(dyn_testdev, 1);
+		goto err;
+	}
+
 	// we have the device number, let's create the device node
 	dyn_testdev_class = class_create (THIS_MODULE, "dyn_testdev_class");
 	if(!dyn_testdev_class) {
 		printk(KERN_INFO "[testmod] Error on device class creation\n");
+		cdev_del(&cdev);
 		unregister_chrdev_region(dyn_testdev, 1);
 		goto err;
 
@@ -114,10 +146,13 @@ static int __init testmod_init(void) {
 	if(!dyn_testdev_dev) {
 		printk(KERN_INFO "[testmod] Error on device creation\n");
 		class_destroy(dyn_testdev_class);
+		cdev_del(&cdev);
 		unregister_chrdev_region(dyn_testdev, 1);
 		goto err;
 
-	}	return 0;
+	}
+
+	return 0;
 err:
 	return -1;
 }
@@ -131,6 +166,7 @@ static void __exit testmod_exit(void)
 	device_destroy(dyn_testdev_class, dyn_testdev);
 	class_destroy(dyn_testdev_class);
 
+	cdev_del(&cdev);
 	// unregister_chrdev_region(stat_testdev, 1);
 	unregister_chrdev_region(dyn_testdev, 1);
 }
@@ -146,4 +182,24 @@ static int testmod_testparm_cb_set(const char *val, const struct kernel_param *k
 	param_set_int(val, kp);
 
 	return 0;
+}
+
+static int testmod_open(struct inode * i, struct file * f) {
+	printk(KERN_INFO "[testmod] fops OPEN \n");
+	return 0;
+}
+
+static int testmod_release(struct inode *i, struct file * f) {
+	printk(KERN_INFO "[testmod] fops RELEASE \n");
+	return 0;
+}
+
+static ssize_t testmod_read(struct file * f, char __user * buf, size_t bytes, loff_t * offset) {
+	printk(KERN_INFO "[testmod] fops READ \n");
+	return 0; // if I return positive value here, the call does not return. Why?
+}
+
+static ssize_t testmod_write(struct file * f, const char __user * buf, size_t bytes, loff_t * offset) {
+	printk(KERN_INFO "[testmod] fops WRITE \n");
+	return bytes;
 }
