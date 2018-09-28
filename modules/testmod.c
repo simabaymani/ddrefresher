@@ -28,6 +28,12 @@
  * 	> dmesg
  * 	> cat /dev/dyn_testdev_dev
  * 	> dmesg
+ *
+ * 6. Test actual write and read of data to device file
+ * 	> echo "hello world" > /dev/dyn_testdev_dev
+ * 	> dmesg
+ * 	> cat /dev/dyn_testdev_dev
+ * 	> dmesg
  * */
 
 #include <linux/kernel.h> // general module development
@@ -37,6 +43,10 @@
 #include <linux/fs.h> // allocation of character devices
 #include <linux/device.h> // creation of device nodes
 #include <linux/cdev.h> // cdev utils
+#include <linux/slab.h> // kmalloc/kfree
+#include <linux/uaccess.h> // copy_to/from_user
+
+#define TESTMOD_ALLOC_SIZE (1024)
 
 // functions in this file
 // module callbacks
@@ -85,6 +95,10 @@ static struct file_operations fops =
 	.open           = testmod_open,
 	.release        = testmod_release,
 };
+
+// variables
+static char * kbuf = 0;
+static unsigned read_done = 0; // ugly read hack to return 0 at some point
 
 // registrations
 MODULE_LICENSE("GPL");
@@ -151,7 +165,13 @@ static int __init testmod_init(void) {
 		goto err;
 
 	}
-
+	kbuf = kmalloc(TESTMOD_ALLOC_SIZE, GFP_KERNEL);
+	if(!kbuf) {
+		printk(KERN_INFO "[testmod] OPEN failed to allocate kernel memory \n");
+		kbuf = 0;
+		return -1;
+	}
+	memset(kbuf, 0, TESTMOD_ALLOC_SIZE);
 	return 0;
 err:
 	return -1;
@@ -162,6 +182,10 @@ static void __exit testmod_exit(void)
 	printk(KERN_INFO "[testmod] Removing test module...\n");
 
 	// free everything in reverse order
+	if(kbuf) {
+		kfree(kbuf);
+		kbuf = 0;
+	}
 	// note that we don't use the struct device here!
 	device_destroy(dyn_testdev_class, dyn_testdev);
 	class_destroy(dyn_testdev_class);
@@ -186,6 +210,7 @@ static int testmod_testparm_cb_set(const char *val, const struct kernel_param *k
 
 static int testmod_open(struct inode * i, struct file * f) {
 	printk(KERN_INFO "[testmod] fops OPEN \n");
+	read_done = 0;
 	return 0;
 }
 
@@ -194,12 +219,38 @@ static int testmod_release(struct inode *i, struct file * f) {
 	return 0;
 }
 
+// returns number of bytes read
+// must return 0 to signal that there is no more data (else cat will go on forever for example)
 static ssize_t testmod_read(struct file * f, char __user * buf, size_t bytes, loff_t * offset) {
+	unsigned long not_read = 0;
 	printk(KERN_INFO "[testmod] fops READ \n");
-	return 0; // if I return positive value here, the call does not return. Why?
+	printk(KERN_INFO "[testmod] READ requested copy length %lu\n", bytes);
+	printk(KERN_INFO "[testmod] READ requested offset %lld\n", *offset);
+	not_read = copy_to_user(buf, kbuf, TESTMOD_ALLOC_SIZE);
+	if(not_read) {
+		printk(KERN_INFO "[testmod] READ could not copy %lu bytes to user\n", not_read);
+	}
+	printk(KERN_INFO "[testmod] kbuf contents: %s\n", kbuf);
+
+	// ugly hack to keep track that we have read once already so that cat can return...
+	if(read_done) {
+		return 0;
+	} else {
+		read_done = 1;
+		return TESTMOD_ALLOC_SIZE;
+	}
 }
 
 static ssize_t testmod_write(struct file * f, const char __user * buf, size_t bytes, loff_t * offset) {
+	unsigned long not_written = 0;
 	printk(KERN_INFO "[testmod] fops WRITE \n");
-	return bytes;
+	printk(KERN_INFO "[testmod] WRITE requested copy length %lu\n", bytes);
+	printk(KERN_INFO "[testmod] WRITE requested offset %lld\n", *offset);
+	// of course, at some point check that we don't write more that our allocated buffer
+	not_written = copy_from_user(kbuf, buf, bytes);
+	if(not_written) {
+		printk(KERN_INFO "[testmod] WRITE could not copy %lu bytes from user\n", not_written);
+	}
+	printk(KERN_INFO "[testmod] kbuf contents: %s\n", kbuf);
+	return bytes - not_written;
 }
