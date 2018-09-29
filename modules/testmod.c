@@ -34,6 +34,10 @@
  * 	> dmesg
  * 	> cat /dev/dyn_testdev_dev
  * 	> dmesg
+ *
+ * 7. Test ioctl call from user space
+ * 	> ./test_ioctl 3
+ * 	> dmesg
  * */
 
 #include <linux/kernel.h> // general module development
@@ -45,8 +49,16 @@
 #include <linux/cdev.h> // cdev utils
 #include <linux/slab.h> // kmalloc/kfree
 #include <linux/uaccess.h> // copy_to/from_user
+#include <linux/ioctl.h>
+#include <linux/types.h> // standard size types
 
+
+// definitions and macros
 #define TESTMOD_ALLOC_SIZE (1024)
+#define TESTMOD_IOCTL_MAGIC ('t')
+
+#define TESTMOD_IOCTL_W _IOW( TESTMOD_IOCTL_MAGIC, 1, int32_t *)
+#define TESTMOD_IOCTL_R _IOR( TESTMOD_IOCTL_MAGIC, 2, int32_t *)
 
 // functions in this file
 // module callbacks
@@ -61,6 +73,7 @@ static int testmod_open(struct inode * i, struct file * f);
 static int testmod_release(struct inode *i, struct file * f);
 static ssize_t testmod_read(struct file * f, char __user * buf, size_t bytes, loff_t * offset);
 static ssize_t testmod_write(struct file * f, const char __user * buf, size_t bytes, loff_t * offset);
+static long testmod_ioctl(struct file *file, unsigned int cmd, unsigned long arg);
 
 // module parameters
 // simple module parameter, just set it when loading module
@@ -94,11 +107,14 @@ static struct file_operations fops =
 	.write          = testmod_write,
 	.open           = testmod_open,
 	.release        = testmod_release,
+	.unlocked_ioctl = testmod_ioctl,
 };
 
 // variables
 static char * kbuf = 0;
 static unsigned read_done = 0; // ugly read hack to return 0 at some point
+static int32_t ioctl_val = 0;
+
 
 // registrations
 MODULE_LICENSE("GPL");
@@ -253,4 +269,25 @@ static ssize_t testmod_write(struct file * f, const char __user * buf, size_t by
 	}
 	printk(KERN_INFO "[testmod] kbuf contents: %s\n", kbuf);
 	return bytes - not_written;
+}
+
+
+// what's in the file pointer? Seems there can be useful data there...
+static long testmod_ioctl(struct file *file, unsigned int cmd, unsigned long arg) {
+	int res = 0;
+
+	switch(cmd) {
+		case TESTMOD_IOCTL_W:
+			printk(KERN_INFO "[testmod] fops IOCTL write \n");
+			res = copy_from_user(&ioctl_val, (int32_t*)arg, sizeof(ioctl_val));
+			break;
+		case TESTMOD_IOCTL_R:
+			printk(KERN_INFO "[testmod] fops IOCTL read \n");
+			res = copy_to_user((int32_t*)arg, &ioctl_val, sizeof(ioctl_val));
+			break;
+		default:
+			break;
+	}
+
+	return res;
 }
